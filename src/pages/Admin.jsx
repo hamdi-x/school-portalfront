@@ -80,15 +80,21 @@
 //   )
 // }
 
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 
-export default function Admin() {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const [token, setToken] = useState(localStorage.getItem("bf_token") || "");
+// Try environment variable -> localhost -> 127.0.0.1
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  "http://localhost:5000" ||
+  "http://127.0.0.1:5000";
 
+const api = axios.create({
+  baseURL: API_BASE,
+  timeout: 10000, // helps catch network errors fast
+});
+
+export default function Admin() {
   // Student form state
   const [sname, setSname] = useState("");
   const [semail, setSemail] = useState("");
@@ -101,83 +107,57 @@ export default function Admin() {
   const [ccredits, setCcredits] = useState(3);
 
   // UI loading states
-  const [loadingLogin, setLoadingLogin] = useState(false);
   const [loadingStudent, setLoadingStudent] = useState(false);
   const [loadingCourse, setLoadingCourse] = useState(false);
 
-  // ensure axios uses token automatically
-  useEffect(() => {
-    if (token) {
-      axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-      localStorage.setItem("bf_token", token);
-    } else {
-      delete axios.defaults.headers.common["Authorization"];
-      localStorage.removeItem("bf_token");
-    }
-  }, [token]);
+  // Message area
+  const [message, setMessage] = useState("");
 
   // Small helper to show messages
   function showMsg(text, isError = false) {
     setMessage(text);
-    if (isError) {
-      // keep visible longer for errors
-      setTimeout(() => setMessage(""), 5000);
+    setTimeout(() => setMessage(""), isError ? 5000 : 3000);
+  }
+
+  // --- PATCHED ERROR HANDLING ---
+  function handleAxiosError(err) {
+    console.error("📛 FULL ERROR:", err);
+
+    if (err.response) {
+      console.error("📡 SERVER RESPONSE:", err.response.data);
+      showMsg(err.response.data?.message || `Server error: ${err.response.status}`, true);
+    } else if (err.request) {
+      console.error("🛑 NO RESPONSE RECEIVED (NETWORK ERROR)");
+      showMsg(
+        "Cannot reach backend. Check if server is running on port 5000, or if firewall blocked it.",
+        true
+      );
     } else {
-      setTimeout(() => setMessage(""), 3000);
+      console.error("⚠️ AXIOS INTERNAL ERROR:", err.message);
+      showMsg(err.message, true);
     }
-  }
-
-  async function login(e) {
-    e.preventDefault();
-    setLoadingLogin(true);
-    try {
-      const res = await axios.post("http://localhost:4000/api/auth/login", {
-        username,
-        password,
-      });
-      setToken(res.data.token);
-      showMsg("Logged in successfully ✅");
-      setUsername("");
-      setPassword("");
-    } catch (err) {
-      console.error(err);
-      showMsg("Login failed — check credentials", true);
-    } finally {
-      setLoadingLogin(false);
-    }
-  }
-
-  function logout() {
-    setToken("");
-    showMsg("Logged out");
   }
 
   async function addStudent(e) {
     e.preventDefault();
-    if (!token) return showMsg("You must login first", true);
     if (!sname || !semail) return showMsg("Name and email are required", true);
 
     setLoadingStudent(true);
     try {
-      const res = await axios.post(
-        "http://localhost:4000/api/students",
-        {
-          name: sname,
-          email: semail,
-          class: sclass,
-          roll: sroll,
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await api.post("/api/students", {
+        name: sname,
+        email: semail,
+        className: sclass,
+        rollNo: sroll,
+      });
+
       showMsg(`Student added: ${res.data.name} ✅`);
-      // reset form
       setSname("");
       setSemail("");
       setSclass("");
       setSroll("");
     } catch (err) {
-      console.error(err);
-      showMsg("Add student failed", true);
+      handleAxiosError(err);
     } finally {
       setLoadingStudent(false);
     }
@@ -185,23 +165,22 @@ export default function Admin() {
 
   async function addCourse(e) {
     e.preventDefault();
-    if (!token) return showMsg("You must login first", true);
     if (!ctitle || !ccode) return showMsg("Title and code are required", true);
 
     setLoadingCourse(true);
     try {
-      const res = await axios.post(
-        "http://localhost:4000/api/courses",
-        { title: ctitle, code: ccode, credits: Number(ccredits) },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await api.post("/api/courses", {
+        title: ctitle,
+        code: ccode,
+        credits: Number(ccredits),
+      });
+
       showMsg(`Course added: ${res.data.title} ✅`);
       setCtitle("");
       setCcode("");
       setCcredits(3);
     } catch (err) {
-      console.error(err);
-      showMsg("Add course failed", true);
+      handleAxiosError(err);
     } finally {
       setLoadingCourse(false);
     }
@@ -212,65 +191,27 @@ export default function Admin() {
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-semibold text-indigo-700">Admin Panel</h2>
-
           <div className="flex items-center gap-3">
-            {token ? (
-              <button
-                onClick={logout}
-                className="px-3 py-1 text-sm rounded bg-white/10 border border-white/10 text-white hover:bg-white/20 transition"
-              >
-                Logout
-              </button>
-            ) : (
-              <span className="text-sm text-slate-500">Not logged in</span>
-            )}
+            <span className="text-sm text-slate-500">
+              No authentication — open admin
+            </span>
           </div>
         </div>
 
         {/* Grid */}
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Login Card */}
-          <form
-            onSubmit={login}
-            className="bg-white rounded-xl shadow p-5 border-t-4 border-indigo-600"
-          >
+          {/* Info Card */}
+          <div className="bg-white rounded-xl shadow p-5 border-t-4 border-indigo-600">
             <h3 className="text-lg font-medium text-indigo-700 mb-3">
-              Admin Login
+              Admin Actions
             </h3>
-
-            <label className="block text-sm text-slate-600">Username</label>
-            <input
-              className="w-full p-2 border rounded mt-1 mb-3"
-              placeholder="username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-
-            <label className="block text-sm text-slate-600">Password</label>
-            <input
-              className="w-full p-2 border rounded mt-1 mb-4"
-              placeholder="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-
-            <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                className="px-4 py-2 rounded bg-indigo-600 text-white font-medium disabled:opacity-60"
-                disabled={loadingLogin}
-              >
-                {loadingLogin ? "Signing in..." : "Login"}
-              </button>
-
-              {token && (
-                <span className="px-3 py-2 rounded bg-green-50 text-green-700 text-sm">
-                  Authenticated
-                </span>
-              )}
-            </div>
-          </form>
+            <p className="text-sm text-slate-500">
+              Use the forms on the right to add students and courses.
+            </p>
+            <p className="text-xs text-slate-400 mt-2">
+              Backend: {API_BASE}
+            </p>
+          </div>
 
           {/* Actions column */}
           <div className="space-y-4">
@@ -281,7 +222,7 @@ export default function Admin() {
             >
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium text-blue-600">Add Student</h3>
-                <small className="text-sm text-slate-400">Requires login</small>
+                <small className="text-sm text-slate-400">No login required</small>
               </div>
 
               <input
@@ -296,6 +237,7 @@ export default function Admin() {
                 value={semail}
                 onChange={(e) => setSemail(e.target.value)}
               />
+
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <input
                   className="w-full p-2 border rounded"
@@ -315,7 +257,7 @@ export default function Admin() {
                 <button
                   type="submit"
                   className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-60"
-                  disabled={loadingStudent || !token}
+                  disabled={loadingStudent}
                 >
                   {loadingStudent ? "Adding..." : "Add Student"}
                 </button>
@@ -328,8 +270,10 @@ export default function Admin() {
               className="bg-white rounded-xl shadow p-5 border-t-4 border-indigo-400"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-medium text-indigo-700">Add Course</h3>
-                <small className="text-sm text-slate-400">Requires login</small>
+                <h3 className="text-lg font-medium text-indigo-700">
+                  Add Course
+                </h3>
+                <small className="text-sm text-slate-400">No login required</small>
               </div>
 
               <input
@@ -338,6 +282,7 @@ export default function Admin() {
                 value={ctitle}
                 onChange={(e) => setCtitle(e.target.value)}
               />
+
               <div className="grid grid-cols-2 gap-2 mt-2">
                 <input
                   className="w-full p-2 border rounded"
@@ -359,7 +304,7 @@ export default function Admin() {
                 <button
                   type="submit"
                   className="px-4 py-2 rounded bg-indigo-600 text-white disabled:opacity-60"
-                  disabled={loadingCourse || !token}
+                  disabled={loadingCourse}
                 >
                   {loadingCourse ? "Adding..." : "Add Course"}
                 </button>
